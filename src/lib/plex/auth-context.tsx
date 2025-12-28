@@ -1,9 +1,9 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { clearPlexToken, getPlexToken, setPlexToken } from "@/lib/plex/storage";
 import type { PlexPin } from "@/lib/plex/pin";
 import { createPlexPin, pollPlexPinForToken } from "@/lib/plex/pin";
 
-type PlexAuthStatus = "signed_out" | "signing_in" | "signed_in";
+type PlexAuthStatus = "loading" | "signed_out" | "signing_in" | "signed_in";
 
 type PlexAuthState = {
   status: PlexAuthStatus;
@@ -15,37 +15,55 @@ type PlexAuthState = {
 type PlexAuthContextValue = PlexAuthState & {
   createPin: () => Promise<PlexPin>;
   pollForToken: (pin: Pick<PlexPin, "id" | "code">, signal?: AbortSignal) => Promise<string>;
-  setToken: (token: string) => void;
-  signOut: () => void;
+  setToken: (token: string) => Promise<void>;
+  signOut: () => Promise<void>;
   clearError: () => void;
 };
 
 const PlexAuthContext = createContext<PlexAuthContextValue | null>(null);
 
 export function PlexAuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setTokenState] = useState<string | null>(() => getPlexToken());
-  const [status, setStatus] = useState<PlexAuthStatus>(() =>
-    token ? "signed_in" : "signed_out"
-  );
+  const [token, setTokenState] = useState<string | null>(null);
+  const [status, setStatus] = useState<PlexAuthStatus>("loading");
   const [activePin, setActivePin] = useState<PlexPin | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
 
-  const setToken = useCallback((nextToken: string) => {
-    setPlexToken(nextToken);
+  const setToken = useCallback(async (nextToken: string) => {
+    await setPlexToken(nextToken);
     setTokenState(nextToken);
     setStatus("signed_in");
     setActivePin(null);
     setError(null);
   }, []);
 
-  const signOut = useCallback(() => {
-    clearPlexToken();
+  const signOut = useCallback(async () => {
+    await clearPlexToken();
     setTokenState(null);
     setStatus("signed_out");
     setActivePin(null);
     setError(null);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const saved = await getPlexToken();
+        if (!mounted) return;
+        setTokenState(saved);
+        setStatus(saved ? "signed_in" : "signed_out");
+      } catch (e) {
+        if (!mounted) return;
+        setTokenState(null);
+        setStatus("signed_out");
+        setError(e instanceof Error ? e.message : "Failed to load Plex session");
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const createPin = useCallback(async () => {
@@ -69,7 +87,7 @@ export function PlexAuthProvider({ children }: { children: React.ReactNode }) {
         setStatus("signing_in");
         setError(null);
         const authToken = await pollPlexPinForToken(pin, { signal });
-        setToken(authToken);
+        await setToken(authToken);
         return authToken;
       } catch (e) {
         // If polling fails, keep the user in signing-in state if they still have a PIN displayed.

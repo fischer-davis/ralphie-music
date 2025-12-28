@@ -2,6 +2,7 @@ import { getOrCreatePlexClientId } from "@/lib/plex/storage";
 
 type PlexHeaderOptions = {
   token?: string | null;
+  accept?: string;
 };
 
 /**
@@ -12,7 +13,7 @@ export function getPlexHeaders(options: PlexHeaderOptions = {}): HeadersInit {
   const clientId = getOrCreatePlexClientId();
 
   const headers: Record<string, string> = {
-    Accept: "application/json",
+    Accept: options.accept ?? "application/json",
 
     // Common Plex client identifiers:
     "X-Plex-Product": "Ralphie Music",
